@@ -26,6 +26,7 @@ function! s:suite.should_read_global_dbs_variable() abort
   call s:expect(getline(1, '$')).to_equal([
         \ '▾ dadbod_gdb_test_function '.g:db_ui_icons.connection_ok,
         \ '  + New query',
+        \ '  ▸ History (0)',
         \ '  ▸ Saved queries (0)',
         \ '  ▸ Tables (2)',
         \ '▸ dadbod_gdb_test_str',

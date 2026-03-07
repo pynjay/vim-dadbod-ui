@@ -16,6 +16,7 @@ function! s:suite.should_show_default_sections() abort
   call s:expect(getline(1, '$')).to_equal([
         \ '▾ dadbod_ui_test '.g:db_ui_icons.connection_ok,
         \ '  + New query',
+        \ '  ▸ History (0)',
         \ '  ▸ Saved queries (0)',
         \ '  ▸ Tables (2)',
         \ '▸ dadbod_ui_testing',

@@ -889,15 +889,36 @@ g:Db_ui_table_name_sorter
 					      *g:db_ui_drawer_sections*
 g:db_ui_drawer_sections
 		This value defines which sections appear in the drawer and in
-		what order. Available sections are: 'new_query', 'buffers',
-		'saved_queries', and 'schemas'. If not set, all sections
-		are shown in the default order.
+		what order. Available sections are: 'new_query', 'query_history',
+		'buffers', 'saved_queries', and 'schemas'. If not set, all sections
+		are shown in default order.
 
 		Example to only show schemas/tables and new query:
 >
 		let g:db_ui_drawer_sections = ['schemas', 'new_query']
 <
-		Default value: `['new_query', 'buffers', 'saved_queries', 'schemas']`
+		Default value: `['new_query', 'query_history', 'buffers', 'saved_queries', 'schemas']`
+
+				      *g:db_ui_query_history_limit*
+g:db_ui_query_history_limit
+		Maximum number of query history entries to keep per connection.
+		History is stored in-memory and is reset when Vim exits.
+
+		Default value: `100`
+
+				      *g:db_ui_enable_heartbeat*
+g:db_ui_enable_heartbeat
+		When set to `1`, DBUI periodically checks active connections using
+		a lightweight ping query. On failure, DBUI will attempt to
+		reconnect with exponential backoff.
+
+		Default value: `1`
+
+				      *g:db_ui_heartbeat_interval*
+g:db_ui_heartbeat_interval
+		Heartbeat interval in milliseconds.
+
+		Default value: `30000`
 
 					      *g:db_ui_dbout_list_sort*
 g:db_ui_dbout_list_sort

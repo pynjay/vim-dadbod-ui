@@ -428,7 +428,9 @@ function! s:drawer.add_db(db) abort
   for section in g:db_ui_drawer_sections
     if section ==# 'new_query'
       call self._render_new_query_section(a:db)
-    elseif section ==# 'buffers' && !empty(a:db.buffers.list)
+    elseif section ==# 'query_history'
+      call self._render_query_history_section(a:db)
+    elseif section ==# 'buffers' && (!empty(get(a:db.buffers, 'list', [])) || !empty(get(a:db.buffers, 'tmp', [])))
       call self._render_buffers_section(a:db)
     elseif section ==# 'saved_queries'
       call self._render_saved_queries_section(a:db)
@@ -515,6 +517,39 @@ function! s:drawer.delete_line() abort
     return self.delete_connection(db)
   endif
 
+  if item.action ==? 'open' && item.type ==? 'history'
+    let db = self.dbui.dbs[item.dbui_db_key_name]
+    if !has_key(db, 'query_history') || empty(get(db.query_history, 'list', []))
+      return
+    endif
+
+    let choice = confirm('Are you sure you want to delete this history entry?', "&Yes\n&No")
+    if choice !=? 1
+      return
+    endif
+
+    let idx = -1
+    for i in range(0, len(db.query_history.list) - 1)
+      let entry = db.query_history.list[i]
+      if get(entry, 'ts', 0) ==? get(item, 'ts', 0)
+            \ && get(entry, 'preview', '') ==? get(item, 'label', '')
+            \ && get(entry, 'duration', '') ==? get(item, 'duration', '')
+        let idx = i
+        break
+      endif
+    endfor
+
+    if idx > -1
+      call remove(db.query_history.list, idx)
+      if exists('*self.dbui.save_query_history')
+        silent! call self.dbui.save_query_history(db.key_name)
+      endif
+      call db_ui#notifications#info('Deleted.')
+      call self.render()
+    endif
+    return
+  endif
+
   if item.action !=? 'open' || item.type !=? 'buffer'
     return
   endif
@@ -541,6 +576,7 @@ function! s:drawer.delete_line() abort
 
     call delete(item.file_path)
     call filter(db.buffers.list, 'v:val !=? item.file_path')
+    call filter(db.buffers.tmp, 'v:val !=? item.file_path')
     call db_ui#notifications#info('Deleted.')
   endif
 
@@ -582,6 +618,7 @@ endfunction
 function! s:drawer.load_saved_queries(db) abort
   if !empty(a:db.save_path)
     let a:db.saved_queries.list = split(glob(printf('%s/*', a:db.save_path)), "\n")
+    call filter(a:db.saved_queries.list, 'fnamemodify(v:val, ":t") !=? "query_history.json"')
   endif
 endfunction
 
@@ -703,10 +740,22 @@ function! s:drawer._render_new_query_section(db) abort
   call self.add('New query', 'open', 'query', g:db_ui_icons.new_query, a:db.key_name, 1)
 endfunction
 
+function! s:drawer._render_query_history_section(db) abort
+  let history = get(a:db, 'query_history', { 'expanded': 0, 'list': [] })
+  call self.add('History ('.len(history.list).')', 'toggle', 'query_history', self.get_toggle_icon('query_history', history), a:db.key_name, 1, { 'expanded': history.expanded })
+  if !history.expanded
+    return
+  endif
+  for entry in reverse(copy(history.list))
+    call self.add(get(entry, 'preview', ''), 'open', 'history', g:db_ui_icons.query_history, a:db.key_name, 2, { 'content': get(entry, 'lines', []), 'ts': get(entry, 'ts', 0), 'duration': get(entry, 'duration', '') })
+  endfor
+endfunction
+
 function! s:drawer._render_buffers_section(db) abort
-  call self.add('Buffers ('.len(a:db.buffers.list).')', 'toggle', 'buffers', self.get_toggle_icon('buffers', a:db.buffers), a:db.key_name, 1, { 'expanded': a:db.buffers.expanded })
+  let bufs = uniq(copy(get(a:db.buffers, 'list', [])) + copy(get(a:db.buffers, 'tmp', [])))
+  call self.add('Buffers ('.len(bufs).')', 'toggle', 'buffers', self.get_toggle_icon('buffers', a:db.buffers), a:db.key_name, 1, { 'expanded': a:db.buffers.expanded })
   if a:db.buffers.expanded
-    for buf in a:db.buffers.list
+    for buf in bufs
       let buflabel = self.get_buffer_name(a:db, buf)
       if self.dbui.is_tmp_location_buffer(a:db, buf)
         let buflabel .= ' *'

@@ -31,10 +31,13 @@ let g:Db_ui_buffer_name_generator = get(g:, 'Db_ui_buffer_name_generator', 0)
 let g:Db_ui_table_name_sorter = get(g:, 'Db_ui_table_name_sorter', 0)
 let g:db_ui_debug = get(g:, 'db_ui_debug', 0)
 let g:db_ui_hide_schemas = get(g:, 'db_ui_hide_schemas', [])
-let g:db_ui_bind_param_pattern = get(g: , 'db_ui_bind_param_pattern', ':\w\+')
+let g:db_ui_bind_param_pattern = get(g:, 'db_ui_bind_param_pattern', ':\w\+')
 let g:db_ui_is_oracle_legacy = get(g:, 'db_ui_is_oracle_legacy', 0)
-let g:db_ui_drawer_sections = get(g:, 'db_ui_drawer_sections', ['new_query', 'buffers', 'saved_queries', 'schemas'])
+let g:db_ui_drawer_sections = get(g:, 'db_ui_drawer_sections', ['new_query', 'query_history', 'buffers', 'saved_queries', 'schemas'])
 let g:db_ui_dbout_list_sort = get(g:, 'db_ui_dbout_list_sort', 'asc')
+let g:db_ui_query_history_limit = get(g:, 'db_ui_query_history_limit', 100)
+let g:db_ui_enable_heartbeat = get(g:, 'db_ui_enable_heartbeat', 1)
+let g:db_ui_heartbeat_interval = get(g:, 'db_ui_heartbeat_interval', 30000)
 
 let s:dbui_icons = get(g:, 'db_ui_icons', {})
 let s:expanded_icon = get(s:dbui_icons, 'expanded', '▾')
@@ -60,6 +63,7 @@ let g:db_ui_icons = {
       \ 'expanded': {
       \   'db': s:expanded_icon,
       \   'buffers': s:expanded_icon,
+      \   'query_history': s:expanded_icon,
       \   'saved_queries': s:expanded_icon,
       \   'schemas': s:expanded_icon,
       \   'schema': s:expanded_icon,
@@ -69,6 +73,7 @@ let g:db_ui_icons = {
       \ 'collapsed': {
       \   'db': s:collapsed_icon,
       \   'buffers': s:collapsed_icon,
+      \   'query_history': s:collapsed_icon,
       \   'saved_queries': s:collapsed_icon,
       \   'schemas': s:collapsed_icon,
       \   'schema': s:collapsed_icon,
@@ -77,6 +82,7 @@ let g:db_ui_icons = {
       \ },
       \ 'saved_query': '*',
       \ 'new_query': '+',
+      \ 'query_history': '⟲',
       \ 'tables': '~',
       \ 'buffers': '»',
       \ 'add_connection': '[+]',
@@ -89,6 +95,7 @@ if g:db_ui_use_nerd_fonts
         \ 'expanded': {
         \   'db': s:expanded_icon.' 󰆼',
         \   'buffers': s:expanded_icon.' ',
+        \   'query_history': s:expanded_icon.' ',
         \   'saved_queries': s:expanded_icon.' ',
         \   'schemas': s:expanded_icon.' ',
         \   'schema': s:expanded_icon.' 󰙅',
@@ -98,6 +105,7 @@ if g:db_ui_use_nerd_fonts
         \ 'collapsed': {
         \   'db': s:collapsed_icon.' 󰆼',
         \   'buffers': s:collapsed_icon.' ',
+        \   'query_history': s:collapsed_icon.' ',
         \   'saved_queries': s:collapsed_icon.' ',
         \   'schemas': s:collapsed_icon.' ',
         \   'schema': s:collapsed_icon.' 󰙅',
@@ -106,6 +114,7 @@ if g:db_ui_use_nerd_fonts
         \ },
         \ 'saved_query': '  ',
         \ 'new_query': '  󰓰',
+        \ 'query_history': '  ',
         \ 'tables': '  󰓫',
         \ 'buffers': '  ',
         \ 'add_connection': '  󰆺',

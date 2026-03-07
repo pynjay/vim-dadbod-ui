@@ -4,12 +4,37 @@ let s:bind_param_rgx = '\(^\|[[:blank:]]\|[^:]\)\('.g:db_ui_bind_param_pattern.'
 
 let s:query_info = {
       \ 'last_query_start_time': 0,
-      \ 'last_query_time': 0
+      \ 'last_query_time': 0,
+      \ 'pending': {},
+      \ 'pending_recorded': 0
       \ }
 
 function! db_ui#query#new(drawer) abort
   let s:query_instance = s:query.new(a:drawer)
   return s:query_instance
+endfunction
+
+function! s:query.open_history(db, item, edit_action) abort
+  let time = exists('*strftime') ? strftime('%Y-%m-%d-%H-%M-%S') : localtime()
+  let name = printf('%s-history-%s', db_ui#utils#slug(a:db.name), time)
+  if !empty(self.drawer.dbui.tmp_location)
+    let buffer_name = printf('%s/%s', self.drawer.dbui.tmp_location, name)
+  else
+    let buffer_name = printf('%s/%s', fnamemodify(tempname(), ':p:h'), name)
+  endif
+
+  call self.focus_window()
+
+  silent! exe a:edit_action.' '.buffer_name
+  setlocal bufhidden=wipe nobuflisted noswapfile
+  let b:dbui_query_history = 1
+  call self.setup_buffer(a:db, {}, buffer_name, 0)
+  let lines = get(a:item, 'content', [])
+  if type(lines) !=? type([])
+    let lines = split(lines, "\n")
+  endif
+  silent 1,$delete _
+  call setline(1, lines)
 endfunction
 
 function! s:query.new(drawer) abort
@@ -27,6 +52,9 @@ endfunction
 
 function! s:query.open(item, edit_action) abort
   let db = self.drawer.dbui.dbs[a:item.dbui_db_key_name]
+  if a:item.type ==? 'history'
+    return self.open_history(db, a:item, a:edit_action)
+  endif
   if a:item.type ==? 'buffer'
     return self.open_buffer(db, a:item.file_path, a:edit_action)
   endif
@@ -213,7 +241,7 @@ endfunction
 function! s:query.execute_query(...) abort
   let is_visual_mode = get(a:, 1, 0)
   let lines = self.get_lines(is_visual_mode)
-  call s:start_query()
+  call s:start_query(get(b:, 'dbui_db_key_name', ''), lines)
   if !is_visual_mode && search(s:bind_param_rgx, 'n') <= 0
     call db_ui#utils#print_debug({ 'message': 'Executing whole buffer', 'command': '%DB' })
     silent! exe '%DB'
@@ -224,9 +252,6 @@ function! s:query.execute_query(...) abort
   let has_async = exists('*db#cancel')
   if has_async
     call db_ui#notifications#info('Executing query...')
-  endif
-  if !has_async
-    call s:print_query_time()
   endif
   let self.last_query = lines
 endfunction
@@ -419,14 +444,91 @@ function! s:query.get_saved_query_db_name() abort
   return ''
 endfunction
 
-function s:start_query() abort
+function! s:start_query(...) abort
+  let dbui_db_key_name = get(a:, 1, '')
+  let lines = get(a:, 2, [])
+  " If an earlier call already prepared a pending query for this execution,
+  " do not clobber it (this commonly happens with nested autocmd flows).
+  if !empty(get(s:query_info, 'pending', {})) && !empty(get(s:query_info, 'last_query_start_time', 0))
+    return
+  endif
+
   let s:query_info.last_query_start_time = reltime()
+
+  if !empty(dbui_db_key_name)
+    let s:query_info.pending = {
+          \ 'db_key_name': dbui_db_key_name,
+          \ 'lines': lines,
+          \ }
+    let s:query_info.pending_recorded = 0
+  elseif &buftype ==? '' && !empty(get(b:, 'dbui_db_key_name', ''))
+    let s:query_info.pending = {
+          \ 'db_key_name': b:dbui_db_key_name,
+          \ 'lines': getline(1, '$'),
+          \ }
+    let s:query_info.pending_recorded = 0
+  endif
 endfunction
 
-function s:print_query_time() abort
+function! s:print_query_time() abort
   if empty(s:query_info.last_query_start_time)
     return
   endif
+
+  " If there is no pending query info, do not print/record. This also makes
+  " the function safe against duplicate DBExecutePost events.
+  if empty(get(s:query_info, 'pending', {}))
+    let s:query_info.last_query_start_time = 0
+    let s:query_info.pending_recorded = 0
+    return
+  endif
+
   let s:query_info.last_query_time = split(reltimestr(reltime(s:query_info.last_query_start_time)))[0]
   call db_ui#notifications#info('Done after '.s:query_info.last_query_time.' sec.')
+  call s:record_history_entry()
+  let s:query_info.last_query_start_time = 0
+  let s:query_info.pending_recorded = 0
+endfunction
+
+function! s:record_history_entry() abort
+  if empty(s:query_instance) || empty(get(s:query_info, 'pending', {}))
+    return
+  endif
+  let pending = s:query_info.pending
+  let db_key = get(pending, 'db_key_name', '')
+  if empty(db_key) || empty(s:query_instance.drawer) || empty(s:query_instance.drawer.dbui)
+    return
+  endif
+  if !has_key(s:query_instance.drawer.dbui.dbs, db_key)
+    return
+  endif
+
+  let db = s:query_instance.drawer.dbui.dbs[db_key]
+  if !has_key(db, 'query_history')
+    let db.query_history = { 'expanded': 0, 'list': [] }
+  endif
+  let limit = get(g:, 'db_ui_query_history_limit', 100)
+  let lines = get(pending, 'lines', [])
+  let preview = ''
+  if len(lines) > 0
+    let preview = substitute(trim(lines[0]), "\t", ' ', 'g')
+  endif
+  if len(preview) > 80
+    let preview = preview[0:80].'...'
+  endif
+
+  call add(db.query_history.list, {
+        \ 'ts': localtime(),
+        \ 'duration': s:query_info.last_query_time,
+        \ 'lines': lines,
+        \ 'preview': preview,
+        \ })
+  if len(db.query_history.list) > limit
+    call remove(db.query_history.list, 0, len(db.query_history.list) - limit - 1)
+  endif
+  let s:query_info.pending = {}
+  if exists('*s:query_instance.drawer.dbui.save_query_history')
+    silent! call s:query_instance.drawer.dbui.save_query_history(db.key_name)
+  endif
+  call s:query_instance.drawer.render()
 endfunction

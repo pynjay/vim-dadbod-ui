@@ -14,7 +14,14 @@ endfunction
 
 function! s:suite.should_open_contacts_table_list_query() abort
   :DBUI
-  norm o3jojojo
+  /dadbod_ui_test
+  norm o
+  /Tables
+  norm o
+  /contacts
+  norm o
+  /List
+  norm o
   let out_name = bufname('.dbout')
   call s:expect(out_name).not.to_be_empty()
   call s:expect(getwinvar(bufwinnr('.dbout'), '&previewwindow')).to_equal(1)
@@ -25,6 +32,10 @@ function! s:suite.should_trigger_auto_execute_when_execute_on_save_is_disabled()
   call SetOptionVariable('db_ui_execute_on_save', 0)
   bw!
   :DBUI
+  /dadbod_ui_test
+  norm o
+  /Tables
+  norm o
   /List
   norm o
   call s:expect(bufname('.dbout')).not.to_be_empty()

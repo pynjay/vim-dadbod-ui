@@ -1,6 +1,8 @@
 let s:dbui_instance = {}
 let s:dbui = {}
 
+let s:heartbeat_timer = -1
+
 function! db_ui#open(mods) abort
   call s:init()
   return s:dbui_instance.drawer.open(a:mods)
@@ -251,6 +253,7 @@ function! s:dbui.generate_new_db_entry(db) abort
         \ 'tables': {'expanded': 0 , 'items': {}, 'list': [] },
         \ 'schemas': {'expanded': 0, 'items': {}, 'list': [] },
         \ 'saved_queries': { 'expanded': 0, 'list': [] },
+        \ 'query_history': { 'expanded': 0, 'list': [] },
         \ 'buffers': { 'expanded': 0, 'list': buffers, 'tmp': [] },
         \ 'save_path': save_path,
         \ 'db_name': !empty(db_name) ? db_name : a:db.name,
@@ -259,11 +262,64 @@ function! s:dbui.generate_new_db_entry(db) abort
         \ 'schema_support': 0,
         \ 'quote': 0,
         \ 'default_scheme': '',
-        \ 'filetype': ''
+        \ 'filetype': '',
+        \ 'last_heartbeat': 0,
+        \ 'heartbeat_failures': 0,
+        \ 'reconnect_attempts': 0
         \ }
 
   call self.populate_schema_info(db)
+  call self.load_query_history(db)
   return db
+endfunction
+
+function! s:dbui.query_history_path(db) abort
+  if empty(get(a:db, 'save_path', ''))
+    return ''
+  endif
+  return printf('%s/%s', a:db.save_path, 'query_history.json')
+endfunction
+
+function! s:dbui.load_query_history(db) abort
+  let path = self.query_history_path(a:db)
+  if empty(path) || !filereadable(path)
+    return
+  endif
+
+  try
+    let raw = join(readfile(path), "\n")
+    if empty(trim(raw))
+      return
+    endif
+    let decoded = json_decode(raw)
+    if type(decoded) !=? type([])
+      return
+    endif
+    let a:db.query_history.list = decoded
+    let limit = get(g:, 'db_ui_query_history_limit', 100)
+    if len(a:db.query_history.list) > limit
+      let a:db.query_history.list = a:db.query_history.list[-limit :]
+    endif
+  catch /.*/
+  endtry
+endfunction
+
+function! s:dbui.save_query_history(db_key_name) abort
+  if empty(a:db_key_name) || !has_key(self.dbs, a:db_key_name)
+    return
+  endif
+  let db = self.dbs[a:db_key_name]
+  let path = self.query_history_path(db)
+  if empty(path)
+    return
+  endif
+  if !isdirectory(db.save_path)
+    call mkdir(db.save_path, 'p')
+  endif
+  try
+    call writefile([json_encode(get(db.query_history, 'list', []))], path)
+  catch /.*/
+  endtry
 endfunction
 
 function! s:dbui.resolve_url_global_variable(Value) abort
@@ -453,9 +509,105 @@ endfunction
 function! s:init() abort
   if empty(s:dbui_instance)
     let s:dbui_instance = s:dbui.new()
+    call s:start_heartbeat_timer()
   endif
 
   return s:dbui_instance
+endfunction
+
+function! s:start_heartbeat_timer() abort
+  if !get(g:, 'db_ui_enable_heartbeat', 1)
+    return
+  endif
+  if !exists('*timer_start')
+    return
+  endif
+  if s:heartbeat_timer !=? -1
+    return
+  endif
+  let interval = get(g:, 'db_ui_heartbeat_interval', 30000)
+  if interval <= 0
+    return
+  endif
+  let s:heartbeat_timer = timer_start(interval, function('s:heartbeat_tick'), { 'repeat': -1 })
+endfunction
+
+function! s:heartbeat_tick(timer) abort
+  if empty(s:dbui_instance)
+    return
+  endif
+  if !get(g:, 'db_ui_enable_heartbeat', 1)
+    return
+  endif
+
+  for db_key in keys(s:dbui_instance.dbs)
+    call s:heartbeat_check_db(db_key)
+  endfor
+endfunction
+
+function! s:heartbeat_check_db(db_key_name) abort
+  if empty(s:dbui_instance) || !has_key(s:dbui_instance.dbs, a:db_key_name)
+    return
+  endif
+
+  let db = s:dbui_instance.dbs[a:db_key_name]
+  if empty(db.conn)
+    return
+  endif
+
+  let scheme_info = db_ui#schemas#get(db.scheme)
+  let ping = db_ui#schemas#ping_query(db.scheme)
+  if empty(ping)
+    return
+  endif
+
+  try
+    call db_ui#schemas#query(db, scheme_info, ping)
+    let db.last_heartbeat = localtime()
+    let db.heartbeat_failures = 0
+    let db.reconnect_attempts = 0
+  catch /.*/
+    let db.heartbeat_failures = get(db, 'heartbeat_failures', 0) + 1
+    let db.conn_error = v:exception
+    let db.conn = ''
+    call s:schedule_reconnect(a:db_key_name)
+  endtry
+endfunction
+
+function! s:schedule_reconnect(db_key_name) abort
+  if !exists('*timer_start')
+    return
+  endif
+  if empty(s:dbui_instance) || !has_key(s:dbui_instance.dbs, a:db_key_name)
+    return
+  endif
+
+  let db = s:dbui_instance.dbs[a:db_key_name]
+  let attempt = get(db, 'reconnect_attempts', 0)
+  if attempt >= 5
+    return
+  endif
+  let db.reconnect_attempts = attempt + 1
+  let backoff_ms = float2nr(pow(2, attempt) * 1000)
+  call timer_start(backoff_ms, function('s:reconnect_db', [a:db_key_name]))
+endfunction
+
+function! s:reconnect_db(db_key_name, ...) abort
+  if empty(s:dbui_instance) || !has_key(s:dbui_instance.dbs, a:db_key_name)
+    return
+  endif
+  if !get(g:, 'db_ui_enable_heartbeat', 1)
+    return
+  endif
+  let db = s:dbui_instance.dbs[a:db_key_name]
+  call s:dbui_instance.connect(db)
+  if !empty(db.conn)
+    let db.heartbeat_failures = 0
+    let db.reconnect_attempts = 0
+  endif
+  if !empty(s:dbui_instance.drawer)
+    call s:dbui_instance.drawer.render()
+  endif
 endfunction
 
 function! s:get_db(saved_query_db) abort

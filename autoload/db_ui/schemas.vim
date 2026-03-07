@@ -256,6 +256,24 @@ function! db_ui#schemas#get(scheme) abort
   return get(s:schemas, a:scheme, {})
 endfunction
 
+function! db_ui#schemas#ping_query(scheme) abort
+  let scheme = tolower(a:scheme)
+  if empty(scheme)
+    return ''
+  endif
+  let scheme_info = db_ui#schemas#get(scheme)
+  if empty(scheme_info)
+    return ''
+  endif
+  if !empty(get(scheme_info, 'ping_query', ''))
+    return scheme_info.ping_query
+  endif
+  if scheme ==? 'oracle'
+    return 'SELECT 1 FROM dual'
+  endif
+  return 'SELECT 1'
+endfunction
+
 function! s:format_query(db, scheme, query) abort
   let conn = type(a:db) == v:t_string ? a:db : a:db.conn
   let callable = get(a:scheme, 'callable', 'interactive')

@@ -24,6 +24,8 @@ endfunction
 function! Cleanup() abort
   call db_ui#reset_state()
   unlet! g:dbs
+  silent! call delete(printf('%s/%s', s:location_path, 'dadbod_ui_test'), 'rf')
+  silent! call delete(printf('%s/%s', s:location_path, 'dadbod_ui_testing'), 'rf')
   let w = 2
   while w <= winnr('$')
       silent! execute w . 'close!'

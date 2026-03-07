@@ -27,6 +27,7 @@ function! s:suite.should_read_global_dbs_variable() abort
         \ '▸ dadbod_gdb_test_string',
         \ '▾ dadbod_gdb_test_fn '.g:db_ui_icons.connection_ok,
         \ '  + New query',
+        \ '  ▸ History (0)',
         \ '  ▸ Saved queries (0)',
         \ '  ▸ Tables (2)',
         \ ])
